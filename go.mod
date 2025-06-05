@@ -5,7 +5,7 @@ go 1.24.3
 require (
 	github.com/gophercloud/gophercloud v1.14.1
 	github.com/gorilla/mux v1.8.1
-	github.com/rs/zerolog v1.33.0
+	github.com/rs/zerolog v1.34.0
 )
 
 require (
