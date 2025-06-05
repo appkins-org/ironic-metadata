@@ -1,0 +1,31 @@
+[Unit]
+Description=Ironic Metadata Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ironic-metadata
+Group=ironic-metadata
+WorkingDirectory=/opt/ironic-metadata
+ExecStart=/opt/ironic-metadata/ironic-metadata
+Restart=always
+RestartSec=5
+Environment=IRONIC_URL=http://localhost:6385
+Environment=BIND_ADDR=169.254.169.254
+Environment=BIND_PORT=80
+Environment=LOG_LEVEL=info
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ironic-metadata
+
+# Capabilities
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

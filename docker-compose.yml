@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Ironic Metadata Service
+  ironic-metadata:
+    build: .
+    container_name: ironic-metadata
+    ports:
+    - "8080:80" # Map to port 8080 for testing, use 80:80 for production
+    environment:
+    - IRONIC_URL=http://ironic-api:6385
+    - BIND_ADDR=0.0.0.0
+    - BIND_PORT=80
+    - LOG_LEVEL=info
+    depends_on:
+    - ironic-api
+    networks:
+    - ironic-network
+    restart: unless-stopped
+
+  # Mock Ironic API for testing (replace with your actual Ironic setup)
+  ironic-api:
+    image: quay.io/metal3-io/ironic:latest
+    container_name: ironic-api
+    ports:
+    - "6385:6385"
+    environment:
+    - IRONIC_DEPLOYMENT=Conductor
+    - IRONIC_ENABLED_DRIVERS=fake-hardware
+    - IRONIC_ENABLED_INTERFACES=fake
+    volumes:
+    - ironic-data:/shared
+    networks:
+    - ironic-network
+    restart: unless-stopped
+
+  # Database for Ironic
+  ironic-db:
+    image: mariadb:10.6
+    container_name: ironic-db
+    environment:
+    - MYSQL_ROOT_PASSWORD=rootpassword
+    - MYSQL_DATABASE=ironic
+    - MYSQL_USER=ironic
+    - MYSQL_PASSWORD=ironicpassword
+    volumes:
+    - ironic-db-data:/var/lib/mysql
+    networks:
+    - ironic-network
+    restart: unless-stopped
+
+networks:
+  ironic-network:
+    driver: bridge
+
+volumes:
+  ironic-data:
+  ironic-db-data:
