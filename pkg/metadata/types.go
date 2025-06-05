@@ -2,7 +2,7 @@ package metadata
 
 import "time"
 
-// MetaData represents the OpenStack metadata structure
+// MetaData represents the OpenStack metadata structure.
 type MetaData struct {
 	UUID             string            `json:"uuid"`
 	Name             string            `json:"name,omitempty"`
@@ -17,21 +17,21 @@ type MetaData struct {
 	CreationTime     *time.Time        `json:"creation_time,omitempty"`
 }
 
-// Key represents an SSH key
+// Key represents an SSH key.
 type Key struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
 	Name string `json:"name"`
 }
 
-// NetworkData represents the OpenStack network data structure
+// NetworkData represents the OpenStack network data structure.
 type NetworkData struct {
 	Links    []Link    `json:"links"`
 	Networks []Network `json:"networks"`
 	Services []Service `json:"services"`
 }
 
-// Link represents a network link
+// Link represents a network link.
 type Link struct {
 	ID                 string `json:"id"`
 	Type               string `json:"type"`
@@ -39,7 +39,7 @@ type Link struct {
 	MTU                int    `json:"mtu,omitempty"`
 }
 
-// Network represents a network configuration
+// Network represents a network configuration.
 type Network struct {
 	ID        string   `json:"id"`
 	Type      string   `json:"type"`
@@ -51,7 +51,7 @@ type Network struct {
 	DNS       []string `json:"dns,omitempty"`
 }
 
-// Route represents a network route
+// Route represents a network route.
 type Route struct {
 	Network string `json:"network"`
 	Gateway string `json:"gateway"`
@@ -59,14 +59,14 @@ type Route struct {
 	Metric  int    `json:"metric,omitempty"`
 }
 
-// Service represents a network service
+// Service represents a network service.
 type Service struct {
 	Type    string `json:"type"`
 	Address string `json:"address"`
 }
 
-// UserData represents user data (typically cloud-init)
+// UserData represents user data (typically cloud-init).
 type UserData string
 
-// VendorData represents vendor-specific data
+// VendorData represents vendor-specific data.
 type VendorData any

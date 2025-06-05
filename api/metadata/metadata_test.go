@@ -8,18 +8,10 @@ import (
 	"time"
 
 	"github.com/appkins-org/ironic-metadata/pkg/client"
-	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/nodes"
 )
 
-// mockIronicClient is a mock implementation for testing
-type mockIronicClient struct{}
-
-func (m *mockIronicClient) GetIronicClient() (*gophercloud.ServiceClient, error) {
-	return &gophercloud.ServiceClient{}, nil
-}
-
-// createTestHandler creates a handler for testing
+// createTestHandler creates a handler for testing.
 func createTestHandler() *Handler {
 	return &Handler{
 		Clients: &client.Clients{},
@@ -158,7 +150,7 @@ func TestBuildNetworkData(t *testing.T) {
 		t.Fatal("buildNetworkData returned nil")
 	}
 
-	// Check that basic network structure is created
+	// Check that basic network structure is created.
 	if len(networkData.Links) == 0 {
 		t.Error("expected at least one network link")
 	}

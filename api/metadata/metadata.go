@@ -13,9 +13,16 @@ import (
 	"github.com/appkins-org/ironic-metadata/pkg/client"
 	"github.com/appkins-org/ironic-metadata/pkg/metadata"
 	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/nodes"
-	utils "github.com/gophercloud/utils/openstack/baremetal/v1/nodes"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
+)
+
+// ContextKey is a custom type for context keys to avoid collisions.
+type ContextKey string
+
+const (
+	// ClientIPKey is the context key for storing client IP.
+	ClientIPKey ContextKey = "client_ip"
 )
 
 // Handler is the struct that implements the http.Handler interface.
@@ -23,7 +30,7 @@ type Handler struct {
 	Clients *client.Clients
 }
 
-// Routes sets up the HTTP routes for the metadata service
+// Routes sets up the HTTP routes for the metadata service.
 func (h *Handler) Routes() http.Handler {
 	r := mux.NewRouter()
 
@@ -53,7 +60,7 @@ func (h *Handler) Routes() http.Handler {
 	return r
 }
 
-// loggingMiddleware logs incoming requests
+// loggingMiddleware logs incoming requests.
 func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -68,16 +75,16 @@ func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// clientIPMiddleware extracts the client IP and stores it in the request context
+// clientIPMiddleware extracts the client IP and stores it in the request context.
 func (h *Handler) clientIPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := getClientIP(r)
-		ctx := context.WithValue(r.Context(), "client_ip", clientIP)
+		ctx := context.WithValue(r.Context(), ClientIPKey, clientIP)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// getClientIP extracts the real client IP from the request
+// getClientIP extracts the real client IP from the request.
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header first
 	xff := r.Header.Get("X-Forwarded-For")
@@ -100,13 +107,22 @@ func getClientIP(r *http.Request) string {
 	return host
 }
 
-// handleOpenStackRoot handles requests to /openstack
+// getClientIPFromContext safely extracts the client IP from the request context.
+func getClientIPFromContext(r *http.Request) (string, error) {
+	clientIP, ok := r.Context().Value(ClientIPKey).(string)
+	if !ok {
+		return "", fmt.Errorf("client IP not found in context")
+	}
+	return clientIP, nil
+}
+
+// handleOpenStackRoot handles requests to /openstack.
 func (h *Handler) handleOpenStackRoot(w http.ResponseWriter, r *http.Request) {
 	versions := []string{"latest"}
 	h.writeJSONResponse(w, versions)
 }
 
-// handleLatestRoot handles requests to /openstack/latest
+// handleLatestRoot handles requests to /openstack/latest.
 func (h *Handler) handleLatestRoot(w http.ResponseWriter, r *http.Request) {
 	endpoints := []string{
 		"meta_data.json",
@@ -118,9 +134,14 @@ func (h *Handler) handleLatestRoot(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, endpoints)
 }
 
-// handleMetaData handles requests to /openstack/latest/meta_data.json
+// handleMetaData handles requests to /openstack/latest/meta_data.json.
 func (h *Handler) handleMetaData(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.Context().Value("client_ip").(string)
+	clientIP, err := getClientIPFromContext(r)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get client IP from context")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
@@ -133,9 +154,14 @@ func (h *Handler) handleMetaData(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, metaData)
 }
 
-// handleNetworkData handles requests to /openstack/latest/network_data.json
+// handleNetworkData handles requests to /openstack/latest/network_data.json.
 func (h *Handler) handleNetworkData(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.Context().Value("client_ip").(string)
+	clientIP, err := getClientIPFromContext(r)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get client IP from context")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
@@ -148,9 +174,14 @@ func (h *Handler) handleNetworkData(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, networkData)
 }
 
-// handleUserData handles requests to /openstack/latest/user_data
+// handleUserData handles requests to /openstack/latest/user_data.
 func (h *Handler) handleUserData(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.Context().Value("client_ip").(string)
+	clientIP, err := getClientIPFromContext(r)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get client IP from context")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
@@ -166,10 +197,12 @@ func (h *Handler) handleUserData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(userData))
+	if _, err := w.Write([]byte(userData)); err != nil {
+		log.Error().Err(err).Msg("Failed to write user data response")
+	}
 }
 
-// handleVendorData handles requests to /openstack/latest/vendor_data.json
+// handleVendorData handles requests to /openstack/latest/vendor_data.json.
 func (h *Handler) handleVendorData(w http.ResponseWriter, r *http.Request) {
 	vendorData := map[string]any{
 		"ironic": map[string]any{
@@ -179,7 +212,7 @@ func (h *Handler) handleVendorData(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, vendorData)
 }
 
-// handleVendorData2 handles requests to /openstack/latest/vendor_data2.json
+// handleVendorData2 handles requests to /openstack/latest/vendor_data2.json.
 func (h *Handler) handleVendorData2(w http.ResponseWriter, r *http.Request) {
 	vendorData := map[string]any{
 		"static": map[string]any{
@@ -191,13 +224,13 @@ func (h *Handler) handleVendorData2(w http.ResponseWriter, r *http.Request) {
 	h.writeJSONResponse(w, vendorData)
 }
 
-// handleEC2Root handles EC2-compatible root requests
+// handleEC2Root handles EC2-compatible root requests.
 func (h *Handler) handleEC2Root(w http.ResponseWriter, r *http.Request) {
 	versions := []string{"latest"}
 	h.writeTextResponse(w, strings.Join(versions, "\n"))
 }
 
-// handleEC2Latest handles EC2-compatible latest requests
+// handleEC2Latest handles EC2-compatible latest requests.
 func (h *Handler) handleEC2Latest(w http.ResponseWriter, r *http.Request) {
 	endpoints := []string{
 		"meta-data/",
@@ -206,9 +239,14 @@ func (h *Handler) handleEC2Latest(w http.ResponseWriter, r *http.Request) {
 	h.writeTextResponse(w, strings.Join(endpoints, "\n"))
 }
 
-// handleEC2MetaData handles EC2-compatible meta-data requests
+// handleEC2MetaData handles EC2-compatible meta-data requests.
 func (h *Handler) handleEC2MetaData(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.Context().Value("client_ip").(string)
+	clientIP, err := getClientIPFromContext(r)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get client IP from context")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
@@ -227,7 +265,7 @@ func (h *Handler) handleEC2MetaData(w http.ResponseWriter, r *http.Request) {
 	h.writeTextResponse(w, strings.Join(ec2Data, "\n"))
 }
 
-// extractFromConfigDrive attempts to extract data from a node's configdrive
+// extractFromConfigDrive attempts to extract data from a node's configdrive.
 func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, error) {
 	configDriveInfo, exists := node.InstanceInfo["configdrive"]
 	if !exists {
@@ -264,7 +302,7 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 	return nil, fmt.Errorf("unsupported configdrive format")
 }
 
-// configDriveData holds extracted configdrive information
+// configDriveData holds extracted configdrive information.
 type configDriveData struct {
 	MetaData    map[string]any    `json:"meta_data,omitempty"`
 	UserData    string            `json:"user_data,omitempty"`
@@ -273,17 +311,7 @@ type configDriveData struct {
 	PublicKeys  map[string]string `json:"public_keys,omitempty"`
 }
 
-// parseConfigDriveContent parses the raw configdrive content
-func (h *Handler) parseConfigDriveContent(configDrive any) (*configDriveData, error) {
-	// This would need to handle the actual configdrive ISO parsing
-	// For now, we'll assume it's already parsed JSON data
-	if configMap, ok := configDrive.(map[string]any); ok {
-		return h.parseConfigDriveMap(configMap)
-	}
-	return nil, fmt.Errorf("unable to parse configdrive content")
-}
-
-// parseConfigDriveMap parses configdrive data from a map
+// parseConfigDriveMap parses configdrive data from a map.
 func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveData, error) {
 	data := &configDriveData{
 		PublicKeys: make(map[string]string),
@@ -331,7 +359,7 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 	return data, nil
 }
 
-// buildMetaData constructs the metadata response for a node
+// buildMetaData constructs the metadata response for a node.
 func (h *Handler) buildMetaData(node *nodes.Node) *metadata.MetaData {
 	metaData := &metadata.MetaData{
 		UUID:         node.UUID,
@@ -397,7 +425,7 @@ func (h *Handler) buildMetaData(node *nodes.Node) *metadata.MetaData {
 	return metaData
 }
 
-// buildNetworkData constructs the network data response for a node
+// buildNetworkData constructs the network data response for a node.
 func (h *Handler) buildNetworkData(node *nodes.Node) *metadata.NetworkData {
 	networkData := &metadata.NetworkData{
 		Links:    []metadata.Link{},
@@ -493,7 +521,7 @@ func (h *Handler) buildNetworkData(node *nodes.Node) *metadata.NetworkData {
 	return networkData
 }
 
-// getUserData extracts user data from the node
+// getUserData extracts user data from the node.
 func (h *Handler) getUserData(node *nodes.Node) string {
 	// Try to extract from configdrive first
 	if configDriveData, err := h.extractFromConfigDrive(node); err == nil &&
@@ -513,7 +541,7 @@ func (h *Handler) getUserData(node *nodes.Node) string {
 	return ""
 }
 
-// getNodeByIP finds a node by its IP address
+// getNodeByIP finds a node by its IP address.
 func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 	// Get the Ironic client
 	ironicClient, err := h.Clients.GetIronicClient()
@@ -545,7 +573,7 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 	return nil, fmt.Errorf("no node found for IP %s", clientIP)
 }
 
-// nodeHasIP checks if a node has the specified IP address
+// nodeHasIP checks if a node has the specified IP address.
 func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 	// Check instance_info for IP addresses
 	if instanceInfo, exists := node.InstanceInfo["fixed_ips"]; exists {
@@ -581,7 +609,7 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 	return false
 }
 
-// Helper functions
+// Helper functions.
 func getNodeHostname(node *nodes.Node) string {
 	if node.Name != "" {
 		return node.Name
@@ -593,7 +621,7 @@ func getProjectID(node *nodes.Node) string {
 	return node.Owner
 }
 
-// writeJSONResponse writes a JSON response
+// writeJSONResponse writes a JSON response.
 func (h *Handler) writeJSONResponse(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
@@ -602,10 +630,12 @@ func (h *Handler) writeJSONResponse(w http.ResponseWriter, data any) {
 	}
 }
 
-// writeTextResponse writes a plain text response
+// writeTextResponse writes a plain text response.
 func (h *Handler) writeTextResponse(w http.ResponseWriter, data string) {
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(data))
+	if _, err := w.Write([]byte(data)); err != nil {
+		log.Error().Err(err).Msg("Failed to write text response")
+	}
 }
 
 // ListenAndServe is a patterned after http.ListenAndServe.
@@ -631,47 +661,3 @@ func ListenAndServe(ctx context.Context, addr netip.AddrPort, h *http.Server) er
 func Serve(_ context.Context, conn net.Listener, h *http.Server) error {
 	return h.Serve(conn)
 }
-
-// createConfigDriveISO creates a configdrive ISO using gophercloud utils
-func (h *Handler) createConfigDriveISO(
-	userData string,
-	networkData map[string]any,
-	metaData map[string]any,
-) ([]byte, error) {
-	configDriveData := utils.ConfigDrive{
-		UserData:    utils.UserDataString(userData),
-		NetworkData: networkData,
-		MetaData:    metaData,
-	}
-
-	configDriveISO, err := configDriveData.ToConfigDrive()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create configdrive ISO: %w", err)
-	}
-
-	return []byte(configDriveISO), nil
-}
-
-// Example usage of configdrive ISO creation:
-// This function demonstrates how to create a configdrive ISO for a node
-//
-// Example:
-//   userData := "#cloud-config\npackages:\n  - nginx"
-//   metaData := map[string]interface{}{
-//     "hostname": "test-node",
-//     "instance-id": node.UUID,
-//   }
-//   networkData := map[string]interface{}{
-//     "links": []interface{}{
-//       map[string]interface{}{
-//         "id": "eth0",
-//         "type": "physical",
-//         "mtu": 1500,
-//       },
-//     },
-//   }
-//   isoBytes, err := h.createConfigDriveISO(userData, networkData, metaData)
-//   if err != nil {
-//     log.Error().Err(err).Msg("Failed to create configdrive ISO")
-//   }
-//
