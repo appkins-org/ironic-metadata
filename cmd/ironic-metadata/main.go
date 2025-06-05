@@ -28,7 +28,11 @@ func main() {
 	bindAddr := getEnvOrDefault("BIND_ADDR", "169.254.169.254")
 	bindPort := getEnvOrDefault("BIND_PORT", "80")
 
-	log.Info().Str("ironic_url", ironicURL).Str("bind_addr", bindAddr).Str("bind_port", bindPort).Msg("Starting ironic-metadata service")
+	log.Info().
+		Str("ironic_url", ironicURL).
+		Str("bind_addr", bindAddr).
+		Str("bind_port", bindPort).
+		Msg("Starting ironic-metadata service")
 
 	// Initialize Ironic client
 	ironicClient, err := createIronicClient(ironicURL)
@@ -61,7 +65,8 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		log.Info().Str("address", addr.String()).Msg("Starting HTTP server")
-		if err := metadata.ListenAndServe(context.Background(), addr, server); err != nil && err != http.ErrServerClosed {
+		if err := metadata.ListenAndServe(context.Background(), addr, server); err != nil &&
+			err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("Failed to start server")
 		}
 	}()

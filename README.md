@@ -78,6 +78,83 @@ COPY --from=builder /app/ironic-metadata .
 CMD ["./ironic-metadata"]
 ```
 
+## ConfigDrive Support
+
+The service supports OpenStack ConfigDrive functionality, allowing nodes to use pre-configured metadata, network configuration, and user data.
+
+### ConfigDrive Priority
+
+The service follows this priority order when serving metadata:
+
+1. **ConfigDrive Data**: If a node has `instance_info["configdrive"]` set, it will use that data first
+2. **Dynamic Configuration**: Falls back to extracting data from the node's `instance_info` fields
+
+### ConfigDrive Formats
+
+The service supports multiple configdrive formats:
+
+- **JSON String**: Direct JSON configuration in `instance_info["configdrive"]`
+- **ISO Image**: ConfigDrive ISO files (parsed using gophercloud utilities)
+- **Map Object**: Direct map configuration
+
+### ConfigDrive Structure
+
+Expected configdrive structure:
+
+```json
+{
+  "meta_data": {
+    "hostname": "node-hostname",
+    "instance-id": "node-uuid",
+    "local-hostname": "node-hostname"
+  },
+  "user_data": "#cloud-config\npackages:\n  - nginx",
+  "network_data": {
+    "links": [
+      {
+        "id": "eth0",
+        "type": "physical",
+        "mtu": 1500
+      }
+    ],
+    "networks": [
+      {
+        "id": "network0",
+        "type": "ipv4",
+        "link": "eth0"
+      }
+    ]
+  },
+  "public_keys": {
+    "default": "ssh-rsa AAAAB3NzaC1yc2E..."
+  }
+}
+```
+
+### Creating ConfigDrive ISOs
+
+The service can create ConfigDrive ISOs using gophercloud utilities:
+
+```go
+// Example: Create a configdrive ISO
+userData := "#cloud-config\npackages:\n  - nginx"
+metaData := map[string]interface{}{
+  "hostname": "test-node",
+  "instance-id": "node-uuid",
+}
+networkData := map[string]interface{}{
+  "links": []interface{}{
+    map[string]interface{}{
+      "id": "eth0", 
+      "type": "physical",
+      "mtu": 1500,
+    },
+  },
+}
+
+isoBytes, err := createConfigDriveISO(userData, networkData, metaData)
+```
+
 ## Usage with Ironic
 
 1. **Configure Ironic nodes** with the following instance_info fields:

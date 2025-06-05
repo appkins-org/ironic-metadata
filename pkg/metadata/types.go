@@ -69,4 +69,4 @@ type Service struct {
 type UserData string
 
 // VendorData represents vendor-specific data
-type VendorData interface{}
+type VendorData any

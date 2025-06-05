@@ -110,12 +110,12 @@ func TestBuildMetaData(t *testing.T) {
 		Name:      "test-node",
 		CreatedAt: now,
 		Owner:     "test-project",
-		InstanceInfo: map[string]interface{}{
-			"public_keys": map[string]interface{}{
+		InstanceInfo: map[string]any{
+			"public_keys": map[string]any{
 				"default": "ssh-rsa AAAAB3NzaC1yc2EAAAADA...",
 			},
 		},
-		Properties: map[string]interface{}{
+		Properties: map[string]any{
 			"memory_mb": "8192",
 			"cpus":      "4",
 		},
