@@ -1,21 +1,48 @@
 version: '3.8'
 
+# Docker Compose configuration for Ironic Metadata Service
+# This service provides OpenStack-compatible metadata endpoints at 169.254.169.254
+#
+# Configuration options:
+# 1. Use remote Ironic API (default): Set IRONIC_URL to your remote Ironic endpoint
+# 2. Use local Ironic API: Keep the ironic-api and ironic-db services enabled
+#
+# Prerequisites:
+# 1. The host network interface specified in 'parent' must exist
+# 2. The macvlan subnet should not conflict with existing networks
+# 3. The host firewall should allow traffic to 169.254.169.254:80
+#
+# Advanced Networking Options:
+#
+# For global routing of 169.254.169.254, choose one of these methods:
+# 1. Router-based NAT/DNAT: Configure your router to forward traffic
+# 2. BGP Anycast: Use BGP to announce the metadata route
+# 3. High Availability: Use keepalived for active/passive failover
+# 4. Load Balancing: Use HAProxy for distributing traffic
+#
+# Setup scripts are available in the scripts/ directory:
+# - ./scripts/setup-network.sh: Auto-detect and configure network interface
+# - ./scripts/setup-advanced-networking.sh: Configure advanced routing
+# - ./scripts/validate-networking.sh: Test network configuration
+#
+# See docs/DOCKER_DEPLOYMENT.md and docs/ADVANCED_NETWORKING.md for details
+
 services:
   # Ironic Metadata Service
   ironic-metadata:
     build: .
     container_name: ironic-metadata
-    ports:
-    - "8080:80" # Map to port 8080 for testing, use 80:80 for production
     environment:
-    - IRONIC_URL=http://ironic-api:6385
-    - BIND_ADDR=0.0.0.0
+    - IRONIC_URL=http://ironic-api:6385/v1
+    - BIND_ADDR=169.254.169.254
     - BIND_PORT=80
     - LOG_LEVEL=info
     depends_on:
     - ironic-api
     networks:
-    - ironic-network
+      metadata-network:
+        ipv4_address: 169.254.169.254 # Bind to metadata service IP
+      ironic-network: # Also connect to internal network for local API access
     restart: unless-stopped
 
   # Mock Ironic API for testing (replace with your actual Ironic setup)
@@ -50,6 +77,18 @@ services:
     restart: unless-stopped
 
 networks:
+  # Macvlan network for metadata service to bind to 169.254.169.254
+  metadata-network:
+    driver: macvlan
+    driver_opts:
+      parent: en0.10 # IMPORTANT: Change this to match your host's primary network interface (e.g., ens3, enp0s3, etc.)
+    ipam:
+      config:
+      - subnet: 169.254.169.0/24
+        ip_range: 169.254.169.254/32
+        gateway: 169.254.169.1
+
+  # Bridge network for other services
   ironic-network:
     driver: bridge
 

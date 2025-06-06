@@ -549,6 +549,12 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 		return nil, fmt.Errorf("failed to get ironic client: %w", err)
 	}
 
+	// Log the endpoint being used for debugging
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("ironic_endpoint", ironicClient.Endpoint).
+		Msg("Attempting to list nodes from Ironic")
+
 	// Create pagination options
 	listOpts := nodes.ListOpts{}
 

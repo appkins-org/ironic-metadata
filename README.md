@@ -299,3 +299,89 @@ Ensure:
 - Deploying nodes can reach 169.254.169.254
 - Proper routing is configured for metadata IP
 - No firewall blocking access to the metadata service
+
+## Advanced Networking and Deployment
+
+### Docker with Macvlan
+
+For local network integration using macvlan networking:
+
+```bash
+# Quick setup with auto-detection
+./scripts/setup-network.sh
+docker-compose up -d ironic-metadata
+
+# Manual setup
+docker-compose up -d ironic-metadata
+```
+
+See [Docker Deployment Guide](docs/DOCKER_DEPLOYMENT.md) for detailed setup instructions.
+
+### Global Routing
+
+To make 169.254.169.254 globally routable across your network infrastructure, several methods are available:
+
+#### Method 1: Router-Based NAT/DNAT (Recommended)
+
+```bash
+# Setup NAT routing automatically
+sudo ./scripts/setup-advanced-networking.sh nat-routing
+
+# Or specify host IP manually
+sudo ./scripts/setup-advanced-networking.sh nat-routing 192.168.1.100
+```
+
+#### Method 2: BGP Anycast Routing
+
+```bash
+# Setup BGP routing with BIRD
+sudo ./scripts/setup-advanced-networking.sh bgp-bird 1.1.1.1 65001 192.168.1.1 65000
+# Arguments: ROUTER_ID LOCAL_AS PEER_IP PEER_AS
+```
+
+#### Method 3: High Availability with Keepalived
+
+```bash
+# Setup keepalived for HA
+sudo ./scripts/setup-advanced-networking.sh keepalived eth0 100 secure_password
+# Arguments: INTERFACE PRIORITY AUTH_PASS
+```
+
+#### Method 4: Load Balancer with HAProxy
+
+```bash
+# Setup HAProxy load balancer
+sudo ./scripts/setup-advanced-networking.sh haproxy "192.168.1.10:80,192.168.1.11:80,192.168.1.12:80"
+```
+
+### Testing Connectivity
+
+```bash
+# Test metadata service connectivity
+./scripts/setup-advanced-networking.sh test
+
+# Manual testing
+curl http://169.254.169.254/openstack/latest/meta_data.json
+ping 169.254.169.254
+traceroute 169.254.169.254
+```
+
+### Advanced Scenarios
+
+For complex networking scenarios including:
+
+- Multi-site deployments
+- Cloud provider integrations (AWS, GCP, Azure)
+- Container orchestration (Kubernetes)
+- Software-defined networking (OpenStack Neutron, VMware NSX-T)
+
+See the [Advanced Networking Guide](docs/ADVANCED_NETWORKING.md) for comprehensive configuration examples.
+
+### Network Architecture Options
+
+1. **Centralized**: Single metadata service with global routing
+2. **Distributed**: Multiple instances with anycast routing
+3. **Proxy-based**: Load balancer with multiple backend services
+4. **Hybrid**: Combination of methods for different network segments
+
+Each approach has different trade-offs in terms of complexity, availability, and performance. Choose based on your infrastructure requirements.
