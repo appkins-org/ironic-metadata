@@ -527,7 +527,6 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 // nodeHasIP checks if a node has the specified IP address.
 func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
-
 	if configDrive, err := h.extractFromConfigDrive(node); err == nil {
 		if configDrive.NetworkData != nil {
 			// Check if the target IP is in the network data
