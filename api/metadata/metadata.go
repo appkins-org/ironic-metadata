@@ -93,7 +93,7 @@ func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// responseWriter wraps http.ResponseWriter to capture status code and response size
+// responseWriter wraps http.ResponseWriter to capture status code and response size.
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode   int
