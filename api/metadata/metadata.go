@@ -304,11 +304,11 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 
 // configDriveData holds extracted configdrive information.
 type configDriveData struct {
-	MetaData    map[string]any    `json:"meta_data,omitempty"`
-	UserData    string            `json:"user_data,omitempty"`
-	NetworkData map[string]any    `json:"network_data,omitempty"`
-	VendorData  map[string]any    `json:"vendor_data,omitempty"`
-	PublicKeys  map[string]string `json:"public_keys,omitempty"`
+	MetaData    *metadata.MetaData    `json:"meta_data,omitempty"`
+	UserData    string                `json:"user_data,omitempty"`
+	NetworkData *metadata.NetworkData `json:"network_data,omitempty"`
+	VendorData  map[string]any        `json:"vendor_data,omitempty"`
+	PublicKeys  map[string]string     `json:"public_keys,omitempty"`
 }
 
 // parseConfigDriveMap parses configdrive data from a map.
@@ -319,8 +319,12 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 
 	// Extract meta_data
 	if metaData, exists := configMap["meta_data"]; exists {
-		if metaMap, ok := metaData.(map[string]any); ok {
-			data.MetaData = metaMap
+		b, err := json.Marshal(metaData) // Ensure metaData is marshaled to check type
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal meta_data: %w", err)
+		}
+		if err := json.Unmarshal(b, &data.MetaData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal meta_data: %w", err)
 		}
 	}
 
@@ -333,8 +337,12 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 
 	// Extract network_data
 	if networkData, exists := configMap["network_data"]; exists {
-		if networkMap, ok := networkData.(map[string]any); ok {
-			data.NetworkData = networkMap
+		b, err := json.Marshal(networkData) // Ensure networkData is marshaled to check type
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal network_data: %w", err)
+		}
+		if err := json.Unmarshal(b, &data.NetworkData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal network_data: %w", err)
 		}
 	}
 
@@ -379,23 +387,15 @@ func (h *Handler) buildMetaData(node *nodes.Node) *metadata.MetaData {
 
 		// Use configdrive metadata if available
 		if configDriveData.MetaData != nil {
-			for key, value := range configDriveData.MetaData {
-				if strValue, ok := value.(string); ok {
-					metaData.Meta[key] = strValue
-				}
+			metaData.InstanceType = configDriveData.MetaData.InstanceType
+			if configDriveData.MetaData.Hostname != "" {
+				metaData.Hostname = configDriveData.MetaData.Hostname
 			}
 		}
 
 		// Use configdrive public keys if available
 		if len(configDriveData.PublicKeys) > 0 {
 			metaData.PublicKeys = configDriveData.PublicKeys
-		}
-
-		// Override hostname if available in configdrive
-		if hostname, exists := configDriveData.MetaData["hostname"]; exists {
-			if hostnameStr, ok := hostname.(string); ok {
-				metaData.Hostname = hostnameStr
-			}
 		}
 
 		return metaData
@@ -437,61 +437,7 @@ func (h *Handler) buildNetworkData(node *nodes.Node) *metadata.NetworkData {
 	if configDriveData, err := h.extractFromConfigDrive(node); err == nil &&
 		configDriveData.NetworkData != nil {
 		log.Debug().Str("node_uuid", node.UUID).Msg("Using configdrive network data")
-
-		// Parse configdrive network data
-		if links, exists := configDriveData.NetworkData["links"]; exists {
-			if linksArray, ok := links.([]any); ok {
-				for _, linkData := range linksArray {
-					if linkMap, ok := linkData.(map[string]any); ok {
-						link := metadata.Link{}
-						if id, exists := linkMap["id"]; exists {
-							if idStr, ok := id.(string); ok {
-								link.ID = idStr
-							}
-						}
-						if linkType, exists := linkMap["type"]; exists {
-							if typeStr, ok := linkType.(string); ok {
-								link.Type = typeStr
-							}
-						}
-						if mtu, exists := linkMap["mtu"]; exists {
-							if mtuFloat, ok := mtu.(float64); ok {
-								link.MTU = int(mtuFloat)
-							}
-						}
-						networkData.Links = append(networkData.Links, link)
-					}
-				}
-			}
-		}
-
-		if networks, exists := configDriveData.NetworkData["networks"]; exists {
-			if networksArray, ok := networks.([]any); ok {
-				for _, netData := range networksArray {
-					if netMap, ok := netData.(map[string]any); ok {
-						network := metadata.Network{}
-						if id, exists := netMap["id"]; exists {
-							if idStr, ok := id.(string); ok {
-								network.ID = idStr
-							}
-						}
-						if netType, exists := netMap["type"]; exists {
-							if typeStr, ok := netType.(string); ok {
-								network.Type = typeStr
-							}
-						}
-						if link, exists := netMap["link"]; exists {
-							if linkStr, ok := link.(string); ok {
-								network.Link = linkStr
-							}
-						}
-						networkData.Networks = append(networkData.Networks, network)
-					}
-				}
-			}
-		}
-
-		return networkData
+		return configDriveData.NetworkData
 	}
 
 	// Fallback to dynamic config from instance info
@@ -581,6 +527,18 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 // nodeHasIP checks if a node has the specified IP address.
 func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
+
+	if configDrive, err := h.extractFromConfigDrive(node); err == nil {
+		if configDrive.NetworkData != nil {
+			// Check if the target IP is in the network data
+			for _, net := range configDrive.NetworkData.Networks {
+				if net.IPAddress == targetIP {
+					return true
+				}
+			}
+		}
+	}
+
 	// Check instance_info for IP addresses
 	if instanceInfo, exists := node.InstanceInfo["fixed_ips"]; exists {
 		if fixedIPs, ok := instanceInfo.([]any); ok {

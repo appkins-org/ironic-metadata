@@ -15,6 +15,7 @@ type MetaData struct {
 	AdminPass        string            `json:"admin_pass,omitempty"`
 	ProjectID        string            `json:"project_id,omitempty"`
 	CreationTime     *time.Time        `json:"creation_time,omitempty"`
+	InstanceType     string            `json:"instance_type"`
 }
 
 // Key represents an SSH key.
@@ -28,15 +29,19 @@ type Key struct {
 type NetworkData struct {
 	Links    []Link    `json:"links"`
 	Networks []Network `json:"networks"`
-	Services []Service `json:"services"`
+	Services []Service `json:"services,omitempty"`
 }
 
 // Link represents a network link.
 type Link struct {
-	ID                 string `json:"id"`
-	Type               string `json:"type"`
-	EthernetMacAddress string `json:"ethernet_mac_address,omitempty"`
-	MTU                int    `json:"mtu,omitempty"`
+	ID                 string   `json:"id"`
+	Type               string   `json:"type"`
+	EthernetMacAddress string   `json:"ethernet_mac_address,omitempty"`
+	MTU                int      `json:"mtu,omitempty"`
+	BondMode           string   `json:"bond_mode,omitempty"`
+	BondLinks          []string `json:"bond_links,omitempty"`
+	BondMIIMon         uint32   `json:"bond_miimon,string,omitempty"`
+	BondHashPolicy     string   `json:"bond_xmit_hash_policy,omitempty"`
 }
 
 // Network represents a network configuration.
