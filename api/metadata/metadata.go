@@ -64,15 +64,51 @@ func (h *Handler) Routes() http.Handler {
 func (h *Handler) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Info().
+
+		// Create a response writer wrapper to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: 200}
+
+		next.ServeHTTP(wrapped, r)
+
+		// Log with comprehensive information
+		logEvent := log.Info()
+		if wrapped.statusCode >= 400 {
+			logEvent = log.Error()
+		} else if wrapped.statusCode >= 300 {
+			logEvent = log.Warn()
+		}
+
+		logEvent.
 			Str("method", r.Method).
 			Str("path", r.URL.Path).
+			Str("query", r.URL.RawQuery).
 			Str("remote_addr", r.RemoteAddr).
 			Str("user_agent", r.UserAgent()).
+			Str("x_forwarded_for", r.Header.Get("X-Forwarded-For")).
+			Str("x_real_ip", r.Header.Get("X-Real-IP")).
+			Int("status_code", wrapped.statusCode).
+			Int64("response_size", wrapped.responseSize).
 			Dur("duration", time.Since(start)).
 			Msg("HTTP request")
 	})
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code and response size
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode   int
+	responseSize int64
+}
+
+func (rw *responseWriter) WriteHeader(statusCode int) {
+	rw.statusCode = statusCode
+	rw.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	size, err := rw.ResponseWriter.Write(b)
+	rw.responseSize += int64(size)
+	return size, err
 }
 
 // clientIPMiddleware extracts the client IP and stores it in the request context.
@@ -90,20 +126,37 @@ func getClientIP(r *http.Request) string {
 	xff := r.Header.Get("X-Forwarded-For")
 	if xff != "" {
 		ips := strings.Split(xff, ",")
-		return strings.TrimSpace(ips[0])
+		clientIP := strings.TrimSpace(ips[0])
+		log.Debug().
+			Str("x_forwarded_for", xff).
+			Str("extracted_ip", clientIP).
+			Msg("Using IP from X-Forwarded-For header")
+		return clientIP
 	}
 
 	// Check X-Real-IP header
 	xri := r.Header.Get("X-Real-IP")
 	if xri != "" {
+		log.Debug().
+			Str("x_real_ip", xri).
+			Msg("Using IP from X-Real-IP header")
 		return xri
 	}
 
 	// Fall back to remote address
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("remote_addr", r.RemoteAddr).
+			Msg("Failed to split host:port from remote address, using as-is")
 		return r.RemoteAddr
 	}
+
+	log.Debug().
+		Str("remote_addr", r.RemoteAddr).
+		Str("extracted_host", host).
+		Msg("Using IP from remote address")
 	return host
 }
 
@@ -138,17 +191,37 @@ func (h *Handler) handleLatestRoot(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMetaData(w http.ResponseWriter, r *http.Request) {
 	clientIP, err := getClientIPFromContext(r)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get client IP from context")
+		log.Error().
+			Err(err).
+			Str("request_path", r.URL.Path).
+			Str("method", r.Method).
+			Msg("Failed to get client IP from context")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("endpoint", "meta_data.json").
+		Msg("Processing metadata request")
+
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
-		log.Error().Err(err).Str("client_ip", clientIP).Msg("Failed to find node for client IP")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("endpoint", "meta_data.json").
+			Msg("Failed to find node for client IP")
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
+
+	log.Info().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Str("endpoint", "meta_data.json").
+		Msg("Successfully matched client IP to node")
 
 	metaData := h.buildMetaData(node)
 	h.writeJSONResponse(w, metaData)
@@ -158,17 +231,37 @@ func (h *Handler) handleMetaData(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleNetworkData(w http.ResponseWriter, r *http.Request) {
 	clientIP, err := getClientIPFromContext(r)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get client IP from context")
+		log.Error().
+			Err(err).
+			Str("request_path", r.URL.Path).
+			Str("method", r.Method).
+			Msg("Failed to get client IP from context")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("endpoint", "network_data.json").
+		Msg("Processing network data request")
+
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
-		log.Error().Err(err).Str("client_ip", clientIP).Msg("Failed to find node for client IP")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("endpoint", "network_data.json").
+			Msg("Failed to find node for client IP")
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
+
+	log.Info().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Str("endpoint", "network_data.json").
+		Msg("Successfully matched client IP to node")
 
 	networkData := h.buildNetworkData(node)
 	h.writeJSONResponse(w, networkData)
@@ -178,27 +271,62 @@ func (h *Handler) handleNetworkData(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleUserData(w http.ResponseWriter, r *http.Request) {
 	clientIP, err := getClientIPFromContext(r)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get client IP from context")
+		log.Error().
+			Err(err).
+			Str("request_path", r.URL.Path).
+			Str("method", r.Method).
+			Msg("Failed to get client IP from context")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("endpoint", "user_data").
+		Msg("Processing user data request")
+
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
-		log.Error().Err(err).Str("client_ip", clientIP).Msg("Failed to find node for client IP")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("endpoint", "user_data").
+			Msg("Failed to find node for client IP")
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
 
+	log.Info().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Str("endpoint", "user_data").
+		Msg("Successfully matched client IP to node")
+
 	userData := h.getUserData(node)
 	if userData == "" {
+		log.Warn().
+			Str("client_ip", clientIP).
+			Str("node_uuid", node.UUID).
+			Str("node_name", node.Name).
+			Msg("No user data found for node")
 		http.Error(w, "User data not found", http.StatusNotFound)
 		return
 	}
 
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Int("user_data_length", len(userData)).
+		Msg("Returning user data")
+
 	w.Header().Set("Content-Type", "text/plain")
 	if _, err := w.Write([]byte(userData)); err != nil {
-		log.Error().Err(err).Msg("Failed to write user data response")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("node_uuid", node.UUID).
+			Msg("Failed to write user data response")
 	}
 }
 
@@ -243,17 +371,37 @@ func (h *Handler) handleEC2Latest(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleEC2MetaData(w http.ResponseWriter, r *http.Request) {
 	clientIP, err := getClientIPFromContext(r)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get client IP from context")
+		log.Error().
+			Err(err).
+			Str("request_path", r.URL.Path).
+			Str("method", r.Method).
+			Msg("Failed to get client IP from context")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	log.Debug().
+		Str("client_ip", clientIP).
+		Str("endpoint", "ec2_meta_data").
+		Msg("Processing EC2-compatible metadata request")
+
 	node, err := h.getNodeByIP(clientIP)
 	if err != nil {
-		log.Error().Err(err).Str("client_ip", clientIP).Msg("Failed to find node for client IP")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("endpoint", "ec2_meta_data").
+			Msg("Failed to find node for client IP")
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
+
+	log.Info().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Str("endpoint", "ec2_meta_data").
+		Msg("Successfully matched client IP to node")
 
 	// EC2-style metadata
 	ec2Data := []string{
@@ -269,6 +417,10 @@ func (h *Handler) handleEC2MetaData(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, error) {
 	configDriveInfo, exists := node.InstanceInfo["configdrive"]
 	if !exists {
+		log.Debug().
+			Str("node_uuid", node.UUID).
+			Str("node_name", node.Name).
+			Msg("No configdrive found in instance_info")
 		return nil, fmt.Errorf("no configdrive found")
 	}
 
@@ -285,20 +437,40 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 			// Try to parse as JSON
 			var configMap map[string]any
 			if err := json.Unmarshal([]byte(configDriveStr), &configMap); err == nil {
+				log.Debug().
+					Str("node_uuid", node.UUID).
+					Msg("Successfully parsed configdrive as JSON string")
 				return h.parseConfigDriveMap(configMap)
+			} else {
+				log.Error().
+					Err(err).
+					Str("node_uuid", node.UUID).
+					Str("configdrive_content", configDriveStr).
+					Msg("Failed to parse configdrive JSON string")
 			}
 		}
 
 		// For ISO files, we would use utils.ConfigDrive to parse
 		// This is a placeholder for ISO parsing functionality
+		log.Warn().
+			Str("node_uuid", node.UUID).
+			Str("configdrive", configDriveStr).
+			Msg("ISO configdrive parsing not yet implemented")
 		return nil, fmt.Errorf("ISO configdrive parsing not yet implemented")
 	}
 
 	// Try to parse as direct JSON data
 	if configMap, ok := configDriveInfo.(map[string]any); ok {
+		log.Debug().
+			Str("node_uuid", node.UUID).
+			Msg("Found configdrive as map")
 		return h.parseConfigDriveMap(configMap)
 	}
 
+	log.Error().
+		Str("node_uuid", node.UUID).
+		Interface("configdrive_type", fmt.Sprintf("%T", configDriveInfo)).
+		Msg("Unsupported configdrive format")
 	return nil, fmt.Errorf("unsupported configdrive format")
 }
 
@@ -317,21 +489,39 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 		PublicKeys: make(map[string]string),
 	}
 
+	log.Debug().
+		Int("config_keys", len(configMap)).
+		Msg("Parsing configdrive map")
+
 	// Extract meta_data
 	if metaData, exists := configMap["meta_data"]; exists {
 		b, err := json.Marshal(metaData) // Ensure metaData is marshaled to check type
 		if err != nil {
+			log.Error().
+				Err(err).
+				Msg("Failed to marshal meta_data from configdrive")
 			return nil, fmt.Errorf("failed to marshal meta_data: %w", err)
 		}
 		if err := json.Unmarshal(b, &data.MetaData); err != nil {
+			log.Error().
+				Err(err).
+				Msg("Failed to unmarshal meta_data from configdrive")
 			return nil, fmt.Errorf("failed to unmarshal meta_data: %w", err)
 		}
+		log.Debug().Msg("Successfully extracted meta_data from configdrive")
 	}
 
 	// Extract user_data
 	if userData, exists := configMap["user_data"]; exists {
 		if userDataStr, ok := userData.(string); ok {
 			data.UserData = userDataStr
+			log.Debug().
+				Int("user_data_length", len(userDataStr)).
+				Msg("Successfully extracted user_data from configdrive")
+		} else {
+			log.Warn().
+				Interface("user_data_type", fmt.Sprintf("%T", userData)).
+				Msg("User data in configdrive is not a string")
 		}
 	}
 
@@ -339,17 +529,31 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 	if networkData, exists := configMap["network_data"]; exists {
 		b, err := json.Marshal(networkData) // Ensure networkData is marshaled to check type
 		if err != nil {
+			log.Error().
+				Err(err).
+				Msg("Failed to marshal network_data from configdrive")
 			return nil, fmt.Errorf("failed to marshal network_data: %w", err)
 		}
 		if err := json.Unmarshal(b, &data.NetworkData); err != nil {
+			log.Error().
+				Err(err).
+				Msg("Failed to unmarshal network_data from configdrive")
 			return nil, fmt.Errorf("failed to unmarshal network_data: %w", err)
 		}
+		log.Debug().Msg("Successfully extracted network_data from configdrive")
 	}
 
 	// Extract vendor_data
 	if vendorData, exists := configMap["vendor_data"]; exists {
 		if vendorMap, ok := vendorData.(map[string]any); ok {
 			data.VendorData = vendorMap
+			log.Debug().
+				Int("vendor_data_keys", len(vendorMap)).
+				Msg("Successfully extracted vendor_data from configdrive")
+		} else {
+			log.Warn().
+				Interface("vendor_data_type", fmt.Sprintf("%T", vendorData)).
+				Msg("Vendor data in configdrive is not a map")
 		}
 	}
 
@@ -359,10 +563,30 @@ func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveDat
 			for name, key := range keysMap {
 				if keyStr, ok := key.(string); ok {
 					data.PublicKeys[name] = keyStr
+				} else {
+					log.Warn().
+						Str("key_name", name).
+						Interface("key_type", fmt.Sprintf("%T", key)).
+						Msg("Public key in configdrive is not a string")
 				}
 			}
+			log.Debug().
+				Int("public_keys_count", len(data.PublicKeys)).
+				Msg("Successfully extracted public keys from configdrive")
+		} else {
+			log.Warn().
+				Interface("public_keys_type", fmt.Sprintf("%T", publicKeys)).
+				Msg("Public keys in configdrive is not a map")
 		}
 	}
+
+	log.Debug().
+		Bool("has_meta_data", data.MetaData != nil).
+		Bool("has_user_data", data.UserData != "").
+		Bool("has_network_data", data.NetworkData != nil).
+		Bool("has_vendor_data", data.VendorData != nil).
+		Int("public_keys_count", len(data.PublicKeys)).
+		Msg("Successfully parsed configdrive data")
 
 	return data, nil
 }
@@ -492,6 +716,10 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 	// Get the Ironic client
 	ironicClient, err := h.Clients.GetIronicClient()
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Msg("Failed to get ironic client")
 		return nil, fmt.Errorf("failed to get ironic client: %w", err)
 	}
 
@@ -506,48 +734,94 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 	allPages, err := nodes.List(ironicClient, listOpts).AllPages()
 	if err != nil {
-		log.Err(err).Str("client_ip", clientIP).Msg("Failed to list nodes")
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("ironic_endpoint", ironicClient.Endpoint).
+			Msg("Failed to list nodes from Ironic API")
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
 	allNodes, err := nodes.ExtractNodes(allPages)
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Msg("Failed to extract nodes from API response")
 		return nil, fmt.Errorf("failed to extract nodes: %w", err)
 	}
+
+	log.Debug().
+		Str("client_ip", clientIP).
+		Int("total_nodes", len(allNodes)).
+		Msg("Successfully retrieved nodes from Ironic")
 
 	// Look for node with matching IP
 	for _, node := range allNodes {
 		// Check if the node has this IP in its port information
 		if h.nodeHasIP(&node, clientIP) {
+			log.Info().
+				Str("client_ip", clientIP).
+				Str("node_uuid", node.UUID).
+				Str("node_name", node.Name).
+				Msg("Found matching node for client IP")
 			return &node, nil
 		}
 	}
 
+	log.Warn().
+		Str("client_ip", clientIP).
+		Int("nodes_checked", len(allNodes)).
+		Msg("No node found matching client IP")
 	return nil, fmt.Errorf("no node found for IP %s", clientIP)
 }
 
 // nodeHasIP checks if a node has the specified IP address.
 func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
+	log.Debug().
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Str("target_ip", targetIP).
+		Msg("Checking if node has target IP")
+
 	if configDrive, err := h.extractFromConfigDrive(node); err == nil {
 		if configDrive.NetworkData != nil {
 			// Check if the target IP is in the network data
 			for _, net := range configDrive.NetworkData.Networks {
 				if net.IPAddress == targetIP {
+					log.Debug().
+						Str("node_uuid", node.UUID).
+						Str("target_ip", targetIP).
+						Str("network_id", net.ID).
+						Msg("Found target IP in configdrive network data")
 					return true
 				}
 			}
 		}
 	} else {
-		log.Err(err).Str("node_uuid", node.UUID).Msg("Failed to extract config drive")
+		log.Debug().
+			Err(err).
+			Str("node_uuid", node.UUID).
+			Msg("Could not extract configdrive for IP matching")
 	}
 
 	// Check instance_info for IP addresses
 	if instanceInfo, exists := node.InstanceInfo["fixed_ips"]; exists {
 		if fixedIPs, ok := instanceInfo.([]any); ok {
-			for _, ip := range fixedIPs {
+			log.Debug().
+				Str("node_uuid", node.UUID).
+				Int("fixed_ips_count", len(fixedIPs)).
+				Msg("Checking fixed_ips in instance_info")
+
+			for i, ip := range fixedIPs {
 				if ipMap, ok := ip.(map[string]any); ok {
 					if ipAddr, exists := ipMap["ip_address"]; exists {
 						if ipStr, ok := ipAddr.(string); ok && ipStr == targetIP {
+							log.Debug().
+								Str("node_uuid", node.UUID).
+								Str("target_ip", targetIP).
+								Int("fixed_ip_index", i).
+								Msg("Found target IP in fixed_ips")
 							return true
 						}
 					}
@@ -561,6 +835,11 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 		if options, ok := driverInfo.(map[string]any); ok {
 			if ip, exists := options["ipa-api-url"]; exists {
 				if ipStr, ok := ip.(string); ok && strings.Contains(ipStr, targetIP) {
+					log.Debug().
+						Str("node_uuid", node.UUID).
+						Str("target_ip", targetIP).
+						Str("ipa_api_url", ipStr).
+						Msg("Found target IP in IPA API URL")
 					return true
 				}
 			}
@@ -569,9 +848,18 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 
 	// For testing purposes, if node name contains the IP
 	if strings.Contains(node.Name, targetIP) {
+		log.Debug().
+			Str("node_uuid", node.UUID).
+			Str("node_name", node.Name).
+			Str("target_ip", targetIP).
+			Msg("Found target IP in node name (testing mode)")
 		return true
 	}
 
+	log.Debug().
+		Str("node_uuid", node.UUID).
+		Str("target_ip", targetIP).
+		Msg("Target IP not found in node")
 	return false
 }
 
@@ -591,7 +879,10 @@ func getProjectID(node *nodes.Node) string {
 func (h *Handler) writeJSONResponse(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Error().Err(err).Msg("Failed to encode JSON response")
+		log.Error().
+			Err(err).
+			Interface("data_type", fmt.Sprintf("%T", data)).
+			Msg("Failed to encode JSON response")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -600,7 +891,10 @@ func (h *Handler) writeJSONResponse(w http.ResponseWriter, data any) {
 func (h *Handler) writeTextResponse(w http.ResponseWriter, data string) {
 	w.Header().Set("Content-Type", "text/plain")
 	if _, err := w.Write([]byte(data)); err != nil {
-		log.Error().Err(err).Msg("Failed to write text response")
+		log.Error().
+			Err(err).
+			Int("data_length", len(data)).
+			Msg("Failed to write text response")
 	}
 }
 
