@@ -60,7 +60,7 @@ func main() {
 
 	// Get configuration from environment variables
 	ironicURL := getEnvOrDefault("IRONIC_URL", "http://localhost:6385")
-	bindAddr := getEnvOrDefault("BIND_ADDR", "169.254.169.254")
+	bindAddr := getEnvOrDefault("BIND_ADDR", "0.0.0.0")
 	bindPort := getEnvOrDefault("BIND_PORT", "80")
 
 	log.Info().
