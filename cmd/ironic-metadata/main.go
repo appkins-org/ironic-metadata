@@ -34,7 +34,29 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(level)
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	// Configure log output based on environment
+	// In Docker/production, use JSON format to stdout
+	// In development, use console format to stderr
+	logFormat := getEnvOrDefault("LOG_FORMAT", "auto")
+
+	switch logFormat {
+	case "json":
+		// JSON format for structured logging (good for production)
+		log.Logger = log.Output(os.Stdout)
+	case "console":
+		// Console format for human-readable output (good for development)
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	case "auto":
+		// Auto-detect: use JSON in Docker, console otherwise
+		if os.Getenv("DOCKER_CONTAINER") == "true" || os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+			log.Logger = log.Output(os.Stdout)
+		} else {
+			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+		}
+	default:
+		// Default to console format to stdout
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	}
 
 	// Get configuration from environment variables
 	ironicURL := getEnvOrDefault("IRONIC_URL", "http://localhost:6385")

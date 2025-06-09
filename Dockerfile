@@ -38,6 +38,10 @@ WORKDIR /root/
 # Copy binary from builder stage
 COPY --from=builder /dist/ironic-metadata .
 
+# Set environment variables for Docker container
+ENV DOCKER_CONTAINER=true
+ENV LOG_FORMAT=json
+
 # Expose port
 EXPOSE 80
 
