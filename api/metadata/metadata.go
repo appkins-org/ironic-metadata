@@ -626,10 +626,7 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 		Str("ironic_endpoint", ironicClient.Endpoint).
 		Msg("Attempting to list nodes from Ironic")
 
-	// Create pagination options
-	listOpts := nodes.ListOpts{}
-
-	allPages, err := nodes.List(ironicClient, listOpts).AllPages()
+	allPages, err := nodes.List(ironicClient, nodes.ListOpts{}).AllPages()
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -655,6 +652,31 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 	// Look for node with matching IP
 	for _, node := range allNodes {
+		getRes := nodes.Get(ironicClient, node.UUID)
+		if getRes.Err != nil {
+			log.Error().
+				Err(getRes.Err).
+				Str("client_ip", clientIP).
+				Str("node_uuid", node.UUID).
+				Str("node_name", node.Name).
+				Msg("Failed to get node details from Ironic API")
+			continue // Skip this node if we can't get its details
+		}
+		log.Debug().
+			Str("client_ip", clientIP).
+			Str("node_uuid", node.UUID).
+			Str("node_name", node.Name).
+			Msg("Checking node for matching IP")
+
+		if err = getRes.ExtractInto(&node); err != nil {
+			log.Error().
+				Err(err).
+				Str("client_ip", clientIP).
+				Str("node_uuid", node.UUID).
+				Str("node_name", node.Name).
+				Msg("Failed to extract node details")
+			continue // Skip this node if we can't extract its details
+		}
 		// Check if the node has this IP in its port information
 		if h.nodeHasIP(&node, clientIP) {
 			log.Info().
