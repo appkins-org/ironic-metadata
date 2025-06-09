@@ -435,12 +435,12 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 		// For now, we'll assume it's a JSON string or try to parse it as such
 		if strings.HasPrefix(configDriveStr, "{") {
 			// Try to parse as JSON
-			var configMap map[string]any
-			if err := json.Unmarshal([]byte(configDriveStr), &configMap); err == nil {
+			var configData configDriveData
+			if err := json.Unmarshal([]byte(configDriveStr), &configData); err == nil {
 				log.Debug().
 					Str("node_uuid", node.UUID).
 					Msg("Successfully parsed configdrive as JSON string")
-				return h.parseConfigDriveMap(configMap)
+				return nil, fmt.Errorf("configdrive is a JSON string, not a file path or URL")
 			} else {
 				log.Error().
 					Err(err).
@@ -459,19 +459,24 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 		return nil, fmt.Errorf("ISO configdrive parsing not yet implemented")
 	}
 
-	// Try to parse as direct JSON data
-	if configMap, ok := configDriveInfo.(map[string]any); ok {
-		log.Debug().
+	dataBytes, err := json.Marshal(configDriveInfo)
+	if err != nil {
+		log.Error().
+			Err(err).
 			Str("node_uuid", node.UUID).
-			Msg("Found configdrive as map")
-		return h.parseConfigDriveMap(configMap)
+			Msg("Failed to marshal configdrive info")
+		return nil, fmt.Errorf("failed to marshal configdrive info: %w", err)
 	}
-
-	log.Error().
-		Str("node_uuid", node.UUID).
-		Interface("configdrive_type", fmt.Sprintf("%T", configDriveInfo)).
-		Msg("Unsupported configdrive format")
-	return nil, fmt.Errorf("unsupported configdrive format")
+	resData := configDriveData{}
+	err = json.Unmarshal(dataBytes, &resData)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("node_uuid", node.UUID).
+			Msg("Failed to unmarshal configdrive data")
+		return nil, fmt.Errorf("failed to unmarshal configdrive data: %w", err)
+	}
+	return &resData, nil
 }
 
 // configDriveData holds extracted configdrive information.
@@ -481,114 +486,6 @@ type configDriveData struct {
 	NetworkData *metadata.NetworkData `json:"network_data,omitempty"`
 	VendorData  map[string]any        `json:"vendor_data,omitempty"`
 	PublicKeys  map[string]string     `json:"public_keys,omitempty"`
-}
-
-// parseConfigDriveMap parses configdrive data from a map.
-func (h *Handler) parseConfigDriveMap(configMap map[string]any) (*configDriveData, error) {
-	data := &configDriveData{
-		PublicKeys: make(map[string]string),
-	}
-
-	log.Debug().
-		Int("config_keys", len(configMap)).
-		Msg("Parsing configdrive map")
-
-	// Extract meta_data
-	if metaData, exists := configMap["meta_data"]; exists {
-		b, err := json.Marshal(metaData) // Ensure metaData is marshaled to check type
-		if err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to marshal meta_data from configdrive")
-			return nil, fmt.Errorf("failed to marshal meta_data: %w", err)
-		}
-		if err := json.Unmarshal(b, &data.MetaData); err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to unmarshal meta_data from configdrive")
-			return nil, fmt.Errorf("failed to unmarshal meta_data: %w", err)
-		}
-		log.Debug().Msg("Successfully extracted meta_data from configdrive")
-	}
-
-	// Extract user_data
-	if userData, exists := configMap["user_data"]; exists {
-		if userDataStr, ok := userData.(string); ok {
-			data.UserData = userDataStr
-			log.Debug().
-				Int("user_data_length", len(userDataStr)).
-				Msg("Successfully extracted user_data from configdrive")
-		} else {
-			log.Warn().
-				Interface("user_data_type", fmt.Sprintf("%T", userData)).
-				Msg("User data in configdrive is not a string")
-		}
-	}
-
-	// Extract network_data
-	if networkData, exists := configMap["network_data"]; exists {
-		b, err := json.Marshal(networkData) // Ensure networkData is marshaled to check type
-		if err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to marshal network_data from configdrive")
-			return nil, fmt.Errorf("failed to marshal network_data: %w", err)
-		}
-		if err := json.Unmarshal(b, &data.NetworkData); err != nil {
-			log.Error().
-				Err(err).
-				Msg("Failed to unmarshal network_data from configdrive")
-			return nil, fmt.Errorf("failed to unmarshal network_data: %w", err)
-		}
-		log.Debug().Msg("Successfully extracted network_data from configdrive")
-	}
-
-	// Extract vendor_data
-	if vendorData, exists := configMap["vendor_data"]; exists {
-		if vendorMap, ok := vendorData.(map[string]any); ok {
-			data.VendorData = vendorMap
-			log.Debug().
-				Int("vendor_data_keys", len(vendorMap)).
-				Msg("Successfully extracted vendor_data from configdrive")
-		} else {
-			log.Warn().
-				Interface("vendor_data_type", fmt.Sprintf("%T", vendorData)).
-				Msg("Vendor data in configdrive is not a map")
-		}
-	}
-
-	// Extract public keys
-	if publicKeys, exists := configMap["public_keys"]; exists {
-		if keysMap, ok := publicKeys.(map[string]any); ok {
-			for name, key := range keysMap {
-				if keyStr, ok := key.(string); ok {
-					data.PublicKeys[name] = keyStr
-				} else {
-					log.Warn().
-						Str("key_name", name).
-						Interface("key_type", fmt.Sprintf("%T", key)).
-						Msg("Public key in configdrive is not a string")
-				}
-			}
-			log.Debug().
-				Int("public_keys_count", len(data.PublicKeys)).
-				Msg("Successfully extracted public keys from configdrive")
-		} else {
-			log.Warn().
-				Interface("public_keys_type", fmt.Sprintf("%T", publicKeys)).
-				Msg("Public keys in configdrive is not a map")
-		}
-	}
-
-	log.Debug().
-		Bool("has_meta_data", data.MetaData != nil).
-		Bool("has_user_data", data.UserData != "").
-		Bool("has_network_data", data.NetworkData != nil).
-		Bool("has_vendor_data", data.VendorData != nil).
-		Int("public_keys_count", len(data.PublicKeys)).
-		Msg("Successfully parsed configdrive data")
-
-	return data, nil
 }
 
 // buildMetaData constructs the metadata response for a node.
