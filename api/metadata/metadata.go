@@ -506,6 +506,7 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 	allPages, err := nodes.List(ironicClient, listOpts).AllPages()
 	if err != nil {
+		log.Err(err).Str("client_ip", clientIP).Msg("Failed to list nodes")
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
@@ -536,6 +537,8 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 				}
 			}
 		}
+	} else {
+		log.Err(err).Str("node_uuid", node.UUID).Msg("Failed to extract config drive")
 	}
 
 	// Check instance_info for IP addresses
