@@ -12,7 +12,7 @@ import (
 
 	"github.com/appkins-org/ironic-metadata/pkg/client"
 	"github.com/appkins-org/ironic-metadata/pkg/metadata"
-	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/nodes"
+	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/nodes"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 )
@@ -205,7 +205,7 @@ func (h *Handler) handleMetaData(w http.ResponseWriter, r *http.Request) {
 		Str("endpoint", "meta_data.json").
 		Msg("Processing metadata request")
 
-	node, err := h.getNodeByIP(clientIP)
+	node, err := h.getNodeByIP(r.Context(), clientIP)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -245,7 +245,7 @@ func (h *Handler) handleNetworkData(w http.ResponseWriter, r *http.Request) {
 		Str("endpoint", "network_data.json").
 		Msg("Processing network data request")
 
-	node, err := h.getNodeByIP(clientIP)
+	node, err := h.getNodeByIP(r.Context(), clientIP)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -285,7 +285,7 @@ func (h *Handler) handleUserData(w http.ResponseWriter, r *http.Request) {
 		Str("endpoint", "user_data").
 		Msg("Processing user data request")
 
-	node, err := h.getNodeByIP(clientIP)
+	node, err := h.getNodeByIP(r.Context(), clientIP)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -385,7 +385,7 @@ func (h *Handler) handleEC2MetaData(w http.ResponseWriter, r *http.Request) {
 		Str("endpoint", "ec2_meta_data").
 		Msg("Processing EC2-compatible metadata request")
 
-	node, err := h.getNodeByIP(clientIP)
+	node, err := h.getNodeByIP(r.Context(), clientIP)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -609,7 +609,7 @@ func (h *Handler) getUserData(node *nodes.Node) string {
 }
 
 // getNodeByIP finds a node by its IP address.
-func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
+func (h *Handler) getNodeByIP(ctx context.Context, clientIP string) (*nodes.Node, error) {
 	// Get the Ironic client
 	ironicClient, err := h.Clients.GetIronicClient()
 	if err != nil {
@@ -626,7 +626,7 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 		Str("ironic_endpoint", ironicClient.Endpoint).
 		Msg("Attempting to list nodes from Ironic")
 
-	allPages, err := nodes.List(ironicClient, nodes.ListOpts{}).AllPages()
+	allPages, err := nodes.ListDetail(ironicClient, nodes.ListOpts{}).AllPages(ctx)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -652,31 +652,6 @@ func (h *Handler) getNodeByIP(clientIP string) (*nodes.Node, error) {
 
 	// Look for node with matching IP
 	for _, node := range allNodes {
-		getRes := nodes.Get(ironicClient, node.UUID)
-		if getRes.Err != nil {
-			log.Error().
-				Err(getRes.Err).
-				Str("client_ip", clientIP).
-				Str("node_uuid", node.UUID).
-				Str("node_name", node.Name).
-				Msg("Failed to get node details from Ironic API")
-			continue // Skip this node if we can't get its details
-		}
-		log.Debug().
-			Str("client_ip", clientIP).
-			Str("node_uuid", node.UUID).
-			Str("node_name", node.Name).
-			Msg("Checking node for matching IP")
-
-		if err = getRes.ExtractInto(&node); err != nil {
-			log.Error().
-				Err(err).
-				Str("client_ip", clientIP).
-				Str("node_uuid", node.UUID).
-				Str("node_name", node.Name).
-				Msg("Failed to extract node details")
-			continue // Skip this node if we can't extract its details
-		}
 		// Check if the node has this IP in its port information
 		if h.nodeHasIP(&node, clientIP) {
 			log.Info().
@@ -707,7 +682,7 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 		if configDrive.NetworkData != nil {
 			// Check if the target IP is in the network data
 			for _, net := range configDrive.NetworkData.Networks {
-				if net.IPAddress == targetIP {
+				if net.Address == targetIP {
 					log.Debug().
 						Str("node_uuid", node.UUID).
 						Str("target_ip", targetIP).

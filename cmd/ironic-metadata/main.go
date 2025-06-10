@@ -12,8 +12,8 @@ import (
 
 	"github.com/appkins-org/ironic-metadata/api/metadata"
 	"github.com/appkins-org/ironic-metadata/pkg/client"
-	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -194,7 +194,7 @@ func createIronicClient(ironicURL string) (*gophercloud.ServiceClient, error) {
 		Msg("Using authentication for Ironic client")
 
 	// Use regular authentication
-	provider, err := openstack.AuthenticatedClient(authOpts)
+	provider, err := openstack.AuthenticatedClient(context.Background(), authOpts)
 	if err != nil {
 		log.Error().
 			Err(err).

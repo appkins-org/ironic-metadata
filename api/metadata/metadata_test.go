@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/appkins-org/ironic-metadata/pkg/client"
-	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/nodes"
+	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/nodes"
 )
 
 // createTestHandler creates a handler for testing.

@@ -3,6 +3,8 @@ package metadata
 import "time"
 
 // MetaData represents the OpenStack metadata structure.
+//
+//go:generate go tool github.com/atombender/go-jsonschema -o models/network_data.go -p models https://docs.openstack.org/nova/latest/_downloads/9119ca7ac90aa2990e762c08baea3a36/network_data.json
 type MetaData struct {
 	UUID             string            `json:"uuid"`
 	Name             string            `json:"name,omitempty"`
@@ -46,21 +48,20 @@ type Link struct {
 
 // Network represents a network configuration.
 type Network struct {
-	ID        string   `json:"id"`
-	Type      string   `json:"type"`
-	Link      string   `json:"link"`
-	IPAddress string   `json:"ip_address,omitempty"`
-	Netmask   string   `json:"netmask,omitempty"`
-	Gateway   string   `json:"gateway,omitempty"`
-	Routes    []Route  `json:"routes,omitempty"`
-	DNS       []string `json:"dns,omitempty"`
+	ID      string  `json:"id,omitempty"`
+	Link    string  `json:"link"`
+	Type    string  `json:"type"`
+	Address string  `json:"ip_address,omitempty"`
+	Netmask string  `json:"netmask,omitempty"`
+	Gateway string  `json:"gateway,omitempty"`
+	Routes  []Route `json:"routes,omitempty"`
 }
 
 // Route represents a network route.
 type Route struct {
-	Network string `json:"network"`
-	Gateway string `json:"gateway"`
-	Netmask string `json:"netmask"`
+	Network string `json:"network,omitempty"`
+	Netmask string `json:"netmask,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
 	Metric  int    `json:"metric,omitempty"`
 }
 

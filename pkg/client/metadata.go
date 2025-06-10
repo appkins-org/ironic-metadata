@@ -9,10 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/drivers"
-	"github.com/gophercloud/gophercloud/openstack/baremetal/v1/nodes"
-	"github.com/gophercloud/gophercloud/pagination"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/drivers"
+	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
 // Clients stores the client connection information for Ironic.
@@ -125,7 +124,7 @@ func waitForConductor(ctx context.Context, client *gophercloud.ServiceClient) {
 
 			err := drivers.ListDrivers(client, drivers.ListDriversOpts{
 				Detail: false,
-			}).EachPage(func(page pagination.Page) (bool, error) {
+			}).EachPage(ctx, func(ctx context.Context, page pagination.Page) (bool, error) {
 				actual, err := drivers.ExtractDrivers(page)
 				if err != nil {
 					return false, err
@@ -141,28 +140,6 @@ func waitForConductor(ctx context.Context, client *gophercloud.ServiceClient) {
 			time.Sleep(5 * time.Second)
 		}
 	}
-}
-
-func (c *Clients) GetNodes() error {
-	client, err := c.GetIronicClient()
-	if err != nil {
-		return err
-	}
-	err = nodes.List(client, nodes.ListOpts{}).EachPage(func(page pagination.Page) (bool, error) {
-		results, err := nodes.ExtractNodes(page)
-		if err != nil {
-			return false, fmt.Errorf("could not list nodes: %s", err)
-		}
-
-		for _, node := range results {
-			log.Printf("[DEBUG] Found node: %s", node.UUID)
-		}
-		return true, nil
-	})
-	if err != nil {
-		return fmt.Errorf("could not list nodes: %s", err)
-	}
-	return nil
 }
 
 // SetIronicClient sets the Ironic client.

@@ -49,3 +49,5 @@ ehthumbs.db
 Thumbs.db
 
 /ironic-metadata
+
+__debug_bin*
