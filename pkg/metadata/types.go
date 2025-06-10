@@ -40,7 +40,7 @@ type Link struct {
 	MTU                int      `json:"mtu,omitempty"`
 	BondMode           string   `json:"bond_mode,omitempty"`
 	BondLinks          []string `json:"bond_links,omitempty"`
-	BondMIIMon         uint32   `json:"bond_miimon,string,omitempty"`
+	BondMIIMon         *uint32  `json:"bond_miimon,omitempty"`
 	BondHashPolicy     string   `json:"bond_xmit_hash_policy,omitempty"`
 }
 
