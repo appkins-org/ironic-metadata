@@ -64,7 +64,7 @@ services:
 
   # Database for Ironic
   ironic-db:
-    image: mariadb:10.6
+    image: mariadb:11.8
     container_name: ironic-db
     environment:
     - MYSQL_ROOT_PASSWORD=rootpassword
