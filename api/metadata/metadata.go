@@ -15,6 +15,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/nodes"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/yaml.v2"
 )
 
 // ContextKey is a custom type for context keys to avoid collisions.
@@ -303,25 +304,35 @@ func (h *Handler) handleUserData(w http.ResponseWriter, r *http.Request) {
 		Str("endpoint", "user_data").
 		Msg("Successfully matched client IP to node")
 
-	userData := h.getUserData(node)
-	if userData == "" {
-		log.Warn().
-			Str("client_ip", clientIP).
-			Str("node_uuid", node.UUID).
-			Str("node_name", node.Name).
-			Msg("No user data found for node")
-		http.Error(w, "User data not found", http.StatusNotFound)
-		return
+	userDataRes := h.getUserData(node)
+	var b []byte
+
+	if userData, ok := userDataRes.(string); ok {
+		if userData == "" {
+			log.Warn().
+				Str("client_ip", clientIP).
+				Str("node_uuid", node.UUID).
+				Str("node_name", node.Name).
+				Msg("No user data found for node")
+			http.Error(w, "User data not found", http.StatusNotFound)
+			return
+		}
+		b = []byte(userData)
+	} else {
+		b, err = yaml.Marshal(userDataRes)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("client_ip", clientIP).
+				Str("node_uuid", node.UUID).
+				Msg("Failed to marshal user data")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	log.Debug().
-		Str("client_ip", clientIP).
-		Str("node_uuid", node.UUID).
-		Int("user_data_length", len(userData)).
-		Msg("Returning user data")
-
 	w.Header().Set("Content-Type", "text/plain")
-	if _, err := w.Write([]byte(userData)); err != nil {
+	if _, err := w.Write(b); err != nil {
 		log.Error().
 			Err(err).
 			Str("client_ip", clientIP).
@@ -482,7 +493,7 @@ func (h *Handler) extractFromConfigDrive(node *nodes.Node) (*configDriveData, er
 // configDriveData holds extracted configdrive information.
 type configDriveData struct {
 	MetaData    *metadata.MetaData    `json:"meta_data,omitempty"`
-	UserData    string                `json:"user_data,omitempty"`
+	UserData    any                   `json:"user_data,omitempty"`
 	NetworkData *metadata.NetworkData `json:"network_data,omitempty"`
 	VendorData  map[string]any        `json:"vendor_data,omitempty"`
 	PublicKeys  map[string]string     `json:"public_keys,omitempty"`
@@ -589,7 +600,7 @@ func (h *Handler) buildNetworkData(node *nodes.Node) *metadata.NetworkData {
 }
 
 // getUserData extracts user data from the node.
-func (h *Handler) getUserData(node *nodes.Node) string {
+func (h *Handler) getUserData(node *nodes.Node) any {
 	// Try to extract from configdrive first
 	if configDriveData, err := h.extractFromConfigDrive(node); err == nil &&
 		configDriveData.UserData != "" {
