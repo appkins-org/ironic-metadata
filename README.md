@@ -179,9 +179,29 @@ isoBytes, err := createConfigDriveISO(userData, networkData, metaData)
 ## How It Works
 
 1. **Client Request**: A deploying node makes an HTTP request to 169.254.169.254
-2. **IP Matching**: The service extracts the client IP and searches Ironic for matching nodes
+2. **IP Matching**: The service extracts the client IP and searches Ironic for matching nodes using multiple methods:
+   - **Primary**: Direct IP matching in node `instance_info`, `configdrive`, or driver information
+   - **Fallback**: MAC address lookup via DHCP lease file (`/shared/dnsmasq/dnsmasq.leases`) followed by port-to-node matching
 3. **Data Retrieval**: Node information is retrieved from Ironic's API
 4. **Response**: Appropriate metadata is returned in the requested format
+
+### Node Discovery Methods
+
+The service uses multiple methods to identify which Ironic node corresponds to a client IP:
+
+1. **Direct IP Matching**: Searches node configurations for the client IP in:
+   - `instance_info.fixed_ips` 
+   - ConfigDrive network data
+   - Driver deployment options (IPA API URLs)
+   - Node name (for testing)
+
+2. **DHCP Lease Fallback**: When direct IP matching fails:
+   - Parses DHCP lease file at `/shared/dnsmasq/dnsmasq.leases`
+   - Extracts MAC address for the client IP
+   - Queries Ironic ports API to find the port with matching MAC address
+   - Returns the node associated with that port
+
+This two-tier approach ensures compatibility with various Ironic deployment scenarios and provides robust node discovery even when IP information isn't directly stored in node configurations.
 
 ## API Examples
 
@@ -280,8 +300,22 @@ MIT License - see [LICENSE](LICENSE) for details.
 ### Common Issues
 
 1. **Node not found**: Ensure the client IP can be matched to a node in Ironic
+   - Check that node `instance_info` contains the client IP in `fixed_ips`
+   - Verify DHCP lease file exists at `/shared/dnsmasq/dnsmasq.leases` for fallback lookup
+   - Ensure ports are correctly configured in Ironic with MAC addresses that match DHCP leases
 2. **Connection refused**: Check that Ironic API is accessible and credentials are correct
 3. **Empty responses**: Verify that nodes have the required instance_info fields set
+
+### DHCP Lease File Format
+
+The service expects dnsmasq lease format at `/shared/dnsmasq/dnsmasq.leases`:
+
+```
+1750802648 9c:6b:00:70:59:8b 10.1.105.195 * *
+1750802648 9c:6b:00:70:59:8a 10.1.105.194 * *
+```
+
+Format: `timestamp mac_address ip_address hostname client_id`
 
 ### Debug Mode
 

@@ -12,6 +12,11 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 
+publish:
+	@echo "Publishing to GitHub..."
+	KO_DOCKER_REPO=ghcr.io/appkins-org/ironic-metadata ko build ./cmd/ironic-metadata --platform=all
+	@echo "Published successfully!"
+
 # Build the application
 build:
 	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) $(BINARY_PATH)
@@ -110,4 +115,4 @@ help:
 	@echo "  docker-run   - Run Docker container"
 	@echo "  help         - Show this help"
 
-.PHONY: build build-all build-linux build-darwin build-windows clean test test-coverage deps run run-dev fmt lint dev-deps release docker-build docker-run help
+.PHONY: publish build build-all build-linux build-darwin build-windows clean test test-coverage deps run run-dev fmt lint dev-deps release docker-build docker-run help

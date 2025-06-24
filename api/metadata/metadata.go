@@ -1,18 +1,21 @@
 package metadata
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/appkins-org/ironic-metadata/pkg/client"
 	"github.com/appkins-org/ironic-metadata/pkg/metadata"
 	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/nodes"
+	"github.com/gophercloud/gophercloud/v2/openstack/baremetal/v1/ports"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
@@ -674,11 +677,28 @@ func (h *Handler) getNodeByIP(ctx context.Context, clientIP string) (*nodes.Node
 		}
 	}
 
+	// Fallback to MAC-to-node lookup using DHCP leases
 	log.Warn().
 		Str("client_ip", clientIP).
 		Int("nodes_checked", len(allNodes)).
-		Msg("No node found matching client IP")
-	return nil, fmt.Errorf("no node found for IP %s", clientIP)
+		Msg("No node found matching client IP, attempting MAC-to-node lookup")
+
+	node, err := h.lookupNodeByMAC(ctx, clientIP)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("client_ip", clientIP).
+			Msg("Failed to perform MAC-to-node lookup")
+		return nil, fmt.Errorf("no node found for IP %s", clientIP)
+	}
+
+	log.Info().
+		Str("client_ip", clientIP).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Msg("Successfully found node via MAC-to-node lookup")
+
+	return node, nil
 }
 
 // nodeHasIP checks if a node has the specified IP address.
@@ -766,6 +786,185 @@ func (h *Handler) nodeHasIP(node *nodes.Node, targetIP string) bool {
 		Str("target_ip", targetIP).
 		Msg("Target IP not found in node")
 	return false
+}
+
+// lookupNodeByMAC performs MAC-to-node lookup by first finding the MAC address
+// from DHCP lease file, then finding the node by that MAC address.
+func (h *Handler) lookupNodeByMAC(ctx context.Context, clientIP string) (*nodes.Node, error) {
+	// Try to get MAC address from DHCP lease file
+	dhcpLeaseFile := "/shared/dnsmasq/dnsmasq.leases"
+	macAddress, err := parseDHCPLeaseFile(dhcpLeaseFile, clientIP)
+	if err != nil {
+		log.Debug().
+			Err(err).
+			Str("client_ip", clientIP).
+			Str("dhcp_lease_file", dhcpLeaseFile).
+			Msg("Failed to find MAC address from DHCP lease file")
+		return nil, fmt.Errorf("failed to find MAC address for IP %s: %w", clientIP, err)
+	}
+
+	// Now find the node by MAC address
+	return h.getNodeByMACAddress(ctx, macAddress)
+}
+
+// parseDHCPLeaseFile parses the DHCP lease file to extract MAC address for the given IP.
+func parseDHCPLeaseFile(filePath, targetIP string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open DHCP lease file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		// Parse dnsmasq lease format: timestamp mac ip hostname client_id
+		// Example: 1750802648 9c:6b:00:70:59:8b 10.1.105.195 * *
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			mac := fields[1]
+			ip := fields[2]
+
+			if ip == targetIP {
+				log.Debug().
+					Str("target_ip", targetIP).
+					Str("mac_address", mac).
+					Str("lease_file", filePath).
+					Msg("Found MAC address for IP in DHCP lease file")
+				return mac, nil
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading DHCP lease file: %w", err)
+	}
+
+	return "", fmt.Errorf("IP address %s not found in DHCP lease file", targetIP)
+}
+
+// getNodeByMACAddress finds a node by its MAC address using the Ironic ports API.
+func (h *Handler) getNodeByMACAddress(ctx context.Context, macAddress string) (*nodes.Node, error) {
+	// Get the Ironic client
+	ironicClient, err := h.Clients.GetIronicClient()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("mac_address", macAddress).
+			Msg("Failed to get ironic client")
+		return nil, fmt.Errorf("failed to get ironic client: %w", err)
+	}
+
+	log.Debug().
+		Str("mac_address", macAddress).
+		Str("ironic_endpoint", ironicClient.Endpoint).
+		Msg("Attempting to find port by MAC address")
+
+	// List all ports and find the one with matching MAC address
+	allPages, err := ports.List(ironicClient, ports.ListOpts{}).AllPages(ctx)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("mac_address", macAddress).
+			Str("ironic_endpoint", ironicClient.Endpoint).
+			Msg("Failed to list ports from Ironic API")
+		return nil, fmt.Errorf("failed to list ports: %w", err)
+	}
+
+	allPorts, err := ports.ExtractPorts(allPages)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("mac_address", macAddress).
+			Msg("Failed to extract ports from API response")
+		return nil, fmt.Errorf("failed to extract ports: %w", err)
+	}
+
+	log.Debug().
+		Str("mac_address", macAddress).
+		Int("total_ports", len(allPorts)).
+		Msg("Successfully retrieved ports from Ironic")
+
+	// Find port with matching MAC address
+	var nodeID string
+	for _, port := range allPorts {
+		if strings.EqualFold(port.Address, macAddress) {
+			nodeID = port.NodeUUID
+			log.Debug().
+				Str("mac_address", macAddress).
+				Str("node_uuid", nodeID).
+				Str("port_uuid", port.UUID).
+				Msg("Found port with matching MAC address")
+			break
+		}
+	}
+
+	if nodeID == "" {
+		log.Warn().
+			Str("mac_address", macAddress).
+			Int("ports_checked", len(allPorts)).
+			Msg("No port found with matching MAC address")
+		return nil, fmt.Errorf("no port found for MAC address %s", macAddress)
+	}
+
+	// Get the node details
+	node, err := nodes.Get(ctx, ironicClient, nodeID).Extract()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("mac_address", macAddress).
+			Str("node_uuid", nodeID).
+			Msg("Failed to get node details")
+		return nil, fmt.Errorf("failed to get node details: %w", err)
+	}
+
+	log.Info().
+		Str("mac_address", macAddress).
+		Str("node_uuid", node.UUID).
+		Str("node_name", node.Name).
+		Msg("Successfully found node by MAC address")
+
+	return node, nil
+}
+
+// getNodeByID finds a node by its UUID.
+func (h *Handler) getNodeByID(ctx context.Context, nodeID string) (*nodes.Node, error) {
+	// Get the Ironic client
+	ironicClient, err := h.Clients.GetIronicClient()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("node_id", nodeID).
+			Msg("Failed to get ironic client")
+		return nil, fmt.Errorf("failed to get ironic client: %w", err)
+	}
+
+	// Log the endpoint being used for debugging
+	log.Debug().
+		Str("node_id", nodeID).
+		Str("ironic_endpoint", ironicClient.Endpoint).
+		Msg("Attempting to find node by ID")
+
+	// Get the node details
+	node, err := nodes.Get(ctx, ironicClient, nodeID).Extract()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("node_id", nodeID).
+			Msg("Failed to get node from Ironic API")
+		return nil, fmt.Errorf("failed to get node: %w", err)
+	}
+
+	log.Info().
+		Str("node_id", nodeID).
+		Str("node_uuid", node.UUID).
+		Msg("Found node by ID")
+
+	return node, nil
 }
 
 // Helper functions.
