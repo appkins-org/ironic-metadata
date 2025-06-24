@@ -61,13 +61,15 @@ another invalid line`,
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			defer os.Remove(tmpFile.Name())
+			defer func() {
+				_ = os.Remove(tmpFile.Name())
+			}()
 
 			// Write test content
 			if _, err := tmpFile.WriteString(tt.leaseContent); err != nil {
 				t.Fatalf("Failed to write to temp file: %v", err)
 			}
-			tmpFile.Close()
+			_ = tmpFile.Close()
 
 			// Test the parsing function
 			mac, err := parseDHCPLeaseFile(tmpFile.Name(), tt.targetIP)
@@ -102,7 +104,9 @@ func TestLookupNodeByMAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
 
 	leaseContent := `1750802648 9c:6b:00:70:59:8b 10.1.105.195 * *
 1750802648 9c:6b:00:70:59:8a 10.1.105.194 * *`
@@ -110,7 +114,7 @@ func TestLookupNodeByMAC(t *testing.T) {
 	if _, err := tmpFile.WriteString(leaseContent); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Note: This test would require mocking the Ironic client to fully test
 	// For now, we just test that the DHCP parsing part works
