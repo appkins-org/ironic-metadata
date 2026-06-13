@@ -933,6 +933,42 @@ func (h *Handler) getNodeByMACAddress(ctx context.Context, macAddress string) (*
 	return node, nil
 }
 
+// getNodeByID finds a node by its UUID.
+func (h *Handler) getNodeByID(ctx context.Context, nodeID string) (*nodes.Node, error) {
+	// Get the Ironic client
+	ironicClient, err := h.Clients.GetIronicClient()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("node_id", nodeID).
+			Msg("Failed to get ironic client")
+		return nil, fmt.Errorf("failed to get ironic client: %w", err)
+	}
+
+	// Log the endpoint being used for debugging
+	log.Debug().
+		Str("node_id", nodeID).
+		Str("ironic_endpoint", ironicClient.Endpoint).
+		Msg("Attempting to find node by ID")
+
+	// Get the node details
+	node, err := nodes.Get(ctx, ironicClient, nodeID).Extract()
+	if err != nil {
+		log.Error().
+			Err(err).
+			Str("node_id", nodeID).
+			Msg("Failed to get node from Ironic API")
+		return nil, fmt.Errorf("failed to get node: %w", err)
+	}
+
+	log.Info().
+		Str("node_id", nodeID).
+		Str("node_uuid", node.UUID).
+		Msg("Found node by ID")
+
+	return node, nil
+}
+
 // Helper functions.
 func getNodeHostname(node *nodes.Node) string {
 	if node.Name != "" {

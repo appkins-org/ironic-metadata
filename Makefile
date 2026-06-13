@@ -14,7 +14,7 @@ GOMOD=$(GOCMD) mod
 
 publish:
 	@echo "Publishing to GitHub..."
-	KO_DOCKER_REPO=ghcr.io/appkins-org/ironic-metadata ko build ./cmd/ironic-metadata --platform=all
+	KO_DOCKER_REPO=ghcr.io/appkins-org/ironic-metadata ko build ./cmd/ironic-metadata --platform=all --bare --image-label=latest --push
 	@echo "Published successfully!"
 
 # Build the application
