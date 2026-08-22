@@ -1,9 +1,9 @@
 module github.com/appkins-org/ironic-metadata
 
-go 1.24.3
+go 1.25.0
 
 require (
-	github.com/gophercloud/gophercloud/v2 v2.0.1-0.20250606113454-07c9cb271ec7
+	github.com/gophercloud/gophercloud/v2 v2.14.0
 	github.com/gorilla/mux v1.8.1
 	github.com/rs/zerolog v1.33.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -23,7 +23,7 @@ require (
 	github.com/sosodev/duration v1.3.1 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
 
 tool github.com/atombender/go-jsonschema
